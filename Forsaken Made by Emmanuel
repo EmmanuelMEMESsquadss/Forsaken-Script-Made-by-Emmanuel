@@ -1,4 +1,4 @@
--- Auto Block Rayfield Script (Full Features) - v4 Gemini Improved
+-- Auto Block Rayfield Script (Full Features) - v4 Gemini Improved (Multi-Damage Msg)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
@@ -221,14 +221,14 @@ local lastPunchTime = 0
 
 -- Health Message States
 local sayOnDamageOn = false
-local messageOnDamage = ""
+local messageOnDamage = {"", "", "", "", "", "", "", "", "", ""} -- Table for 10 messages
 local sayOnLowHealthOn = false
 local messageOnLowHealth = ""
 local lowHealthAmount = 30
 local isAlreadyLow = false
 local previousHealth = 100
 local lastDamageMessageTime = 0
-local DAMAGE_MESSAGE_COOLDOWN = 1.0 -- Cooldown in seconds to prevent spam
+local DAMAGE_MESSAGE_COOLDOWN = 2.0 -- Increased cooldown to 2 seconds
 
 -- Ping Compensation
 local pingCompEnabled = false
@@ -1128,13 +1128,20 @@ HealthTab:CreateToggle({
     Callback = function(Value) sayOnDamageOn = Value end
 })
 
-HealthTab:CreateInput({
-    Name = "Message on Damage",
-    PlaceholderText = "Ouch! That tickles.",
-    RemoveTextAfterFocusLost = false,
-    Flag = "SayOnDamageText",
-    Callback = function(Text) messageOnDamage = Text end
-})
+-- ===== NEW: 10 Damage Message Inputs =====
+HealthTab:CreateParagraph({ Title = "Damage Messages", Content = "Set up to 10 messages. One will be chosen randomly on damage."})
+for i = 1, 10 do
+    HealthTab:CreateInput({
+        Name = "Damage Message " .. i,
+        PlaceholderText = "Ouch #" .. i,
+        RemoveTextAfterFocusLost = false,
+        Flag = "SayOnDamageText_" .. i, -- Unique flag for saving
+        Callback = function(Text) 
+            messageOnDamage[i] = Text 
+        end
+    })
+end
+-- =======================================
 
 HealthTab:CreateToggle({
     Name = "Say Message on Low Health",
@@ -1562,12 +1569,26 @@ local function setupHealthMonitor(char)
         healthConnection = hum.HealthChanged:Connect(function(newHealth)
             local now = tick()
             
-            -- 1. Say on Damage
-            if sayOnDamageOn and newHealth < previousHealth and messageOnDamage and #messageOnDamage > 0 then
+            -- 1. Say on Damage (Now supports multiple messages randomly)
+            if sayOnDamageOn and newHealth < previousHealth then
                 -- Check for damage and if cooldown has passed
                 if now - lastDamageMessageTime > DAMAGE_MESSAGE_COOLDOWN then
-                    lastDamageMessageTime = now
-                    pcall(sendChatMessage, messageOnDamage)
+                    -- Filter out empty messages from the table
+                    local validMessages = {}
+                    for _, msg in ipairs(messageOnDamage) do
+                        if msg and #msg > 0 then
+                            table.insert(validMessages, msg)
+                        end
+                    end
+
+                    -- If there are any valid messages, pick one randomly
+                    if #validMessages > 0 then
+                        local randomIndex = math.random(1, #validMessages)
+                        local chosenMessage = validMessages[randomIndex]
+                        
+                        lastDamageMessageTime = now
+                        pcall(sendChatMessage, chosenMessage)
+                    end
                 end
             end
 
