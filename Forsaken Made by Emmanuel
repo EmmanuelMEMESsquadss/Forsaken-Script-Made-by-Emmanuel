@@ -1,4 +1,4 @@
--- Auto Block Rayfield Script (Full Features) - v7 Gemini Improved (Stamina Tab)
+-- Auto Block Rayfield Script (Full Features) - v8 Gemini Improved (Stamina Tab Fixed)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
@@ -55,7 +55,7 @@ local PredictiveTab = Window:CreateTab("Predictive Auto Block", 4483362458)
 local FakeBlockTab = Window:CreateTab("Fake Block", 4483362458)
 local AutoPunchTab = Window:CreateTab("Auto Punch", 4483362458)
 local CustomAnimationsTab = Window:CreateTab("Custom Animations", 4483362458)
-local StaminaTab = Window:CreateTab("Stamina", 4483362458) -- <-- NEW TAB
+local StaminaTab = Window:CreateTab("Stamina", 4483362458) -- <-- FIXED TAB
 local HealthTab = Window:CreateTab("Health", 4483362458)
 local MiscTab = Window:CreateTab("Misc", 4483362458)
 
@@ -231,9 +231,13 @@ local lastLocalBlockTime = 0 -- Renamed from AUDIO_LOCAL_COOLDOWN
 
 -- ===== NEW: Stamina Feature States =====
 local staminaGainOn = false
-local staminaGainAmount = 100 -- Default to 100 (e.g., set stamina to 100)
+local staminaGainAmount = 100 -- (e.g., set stamina TO 100)
 local staminaLossOn = false
-local staminaLossAmount = 0 -- Default to 0 (e.g., set stamina drain to 0)
+local staminaLossAmount = 0 -- (e.g., set stamina drain rate TO 0)
+local sprintSpeedOn = false
+local sprintSpeedAmount = 16 -- Default walkspeed
+local originalWalkSpeed = 16 -- To restore
+local walkSpeedSet = false -- Flag to get original speed once
 -- =======================================
 
 -- ===== REMOVED: Object Pool for Better Detection (BD) parts =====
@@ -262,6 +266,7 @@ end
 lp.CharacterAdded:Connect(function(char)
     task.wait(0.5)
     refreshAnimator()
+    walkSpeedSet = false -- Reset flag on respawn
 end)
 
 local cachedPlayerGui = PlayerGui
@@ -908,15 +913,15 @@ CustomAnimationsTab:CreateToggle({
     end,
 })
 
--- ===== NEW: StaminaTab UI =====
+-- ===== NEW: StaminaTab UI (FIXED) =====
 StaminaTab:CreateParagraph({
     Title = "Warning",
-    Content = "This feature is game-specific. It will NOT work until the script is configured with your game's stamina system."
+    Content = "This feature is game-specific. It works by *guessing* your game's stamina objects (e.g., 'Stamina' value in your Character). If it doesn't work, the names are different."
 })
 
 StaminaTab:CreateParagraph({
     Title = "How-To",
-    Content = "Find the 'c00lgui' stamina code and give it to the script developer (Gemini) to integrate."
+    Content = "For 'Stamina Loss', a value of 0 usually means 'No Stamina Drain'."
 })
 
 StaminaTab:CreateToggle({
@@ -950,6 +955,35 @@ StaminaTab:CreateInput({
     Flag = "StaminaLossAmount",
     Callback = function(Text) 
         staminaLossAmount = tonumber(Text) or 0
+    end
+})
+
+-- ===== ADDED SPRINT SPEED UI =====
+StaminaTab:CreateToggle({
+    Name = "Enable Custom Sprint Speed",
+    CurrentValue = false,
+    Flag = "SprintSpeedToggle",
+    Callback = function(Value) 
+        sprintSpeedOn = Value
+        -- Restore original speed if toggled off
+        if not Value then
+            pcall(function()
+                local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    hum.WalkSpeed = originalWalkSpeed
+                end
+            end)
+        end
+    end
+})
+
+StaminaTab:CreateInput({
+    Name = "Sprint Speed Amount",
+    PlaceholderText = "16",
+    RemoveTextAfterFocusLost = false,
+    Flag = "SprintSpeedAmount",
+    Callback = function(Text) 
+        sprintSpeedAmount = tonumber(Text) or 16
     end
 })
 -- ============================
@@ -1062,7 +1096,11 @@ local function restoreHumState(hum)
     local s = savedHumanoidState[hum]
     if not s then return end
     pcall(function()
-        if s.WalkSpeed ~= nil then hum.WalkSpeed = s.WalkSpeed end
+        -- Only restore if sprint speed isn't active
+        if s.WalkSpeed ~= nil and not sprintSpeedOn then 
+            hum.WalkSpeed = s.WalkSpeed 
+        end
+        
         if s.JumpPower ~= nil then
             local ok, _ = pcall(function() hum.JumpPower = s.JumpPower end)
             if not ok then pcall(function() hum.JumpHeight = s.JumpPower end) end
@@ -1852,7 +1890,10 @@ local function beginDragIntoKiller(killerModel)
             conn:Disconnect()
             if bv and bv.Parent then pcall(function() bv:Destroy() end) end
             pcall(function()
-                humanoid.WalkSpeed = oldWalk
+                -- Only restore if sprint speed isn't active
+                if not sprintSpeedOn then
+                    humanoid.WalkSpeed = oldWalk
+                end
                 humanoid.JumpPower = oldJump
                 humanoid.PlatformStand = oldPlatformStand
             end)
@@ -2105,48 +2146,85 @@ end)
 
 -- REMOVED PROACTIVE BLOCKING LOOP
 
--- ===== NEW: Stamina Placeholder Functions =====
--- We will fill these in once we have the intel from 'c00lgui'
-local staminaObject = nil -- We need to find this!
+-- ===== NEW: Stamina Logic Functions (REPLACES PLACEHOLDERS) =====
+local staminaValueObj = nil
+local staminaDrainScript = nil -- This is a guess
+local staminaDrainValue = nil -- This is also a guess
 
-local function findStaminaObject()
-    --[[
-        This is where we'll add the code to find the stamina.
-        Example (NEEDS TO BE VERIFIED):
-        
-        if staminaObject and staminaObject.Parent then return true end -- Already found
-        staminaObject = lp.Character:FindFirstChild("Stamina")
-        if staminaObject then return true end
-        
-        return false
-    ]]
-    return false -- Return false until we add the real code
+-- Try to find the common stamina objects
+local function findStaminaObjects()
+    if not lp.Character then return end
+    
+    -- 1. Find Stamina Value
+    if not (staminaValueObj and staminaValueObj.Parent) then
+        staminaValueObj = lp.Character:FindFirstChild("Stamina")
+    end
+
+    -- 2. Find Stamina Drain Script/Value (This is a guess, but common)
+    if not (staminaDrainValue and staminaDrainValue.Parent) then
+        local playerScripts = lp:FindFirstChild("PlayerScripts")
+        if playerScripts then
+            staminaDrainScript = playerScripts:FindFirstChild("StaminaScript") 
+                or playerScripts:FindFirstChild("ClientStamina")
+                or playerScripts:FindFirstChild("Stamina") -- Sometimes the script itself is named this
+            
+            if staminaDrainScript then
+                 staminaDrainValue = staminaDrainScript:FindFirstChild("DrainRate") 
+                                   or staminaDrainScript:FindFirstChild("StaminaDrain")
+            end
+        end
+    end
 end
 
+-- Call this when character is added to re-find objects
+lp.CharacterAdded:Connect(function(char)
+    staminaValueObj = nil
+    staminaDrainScript = nil
+    staminaDrainValue = nil
+    walkSpeedSet = false -- Also reset walkspeed flag
+    task.wait(1.5) -- Give game scripts time to load
+    findStaminaObjects()
+end)
+
+-- Call it once on startup
+task.wait(1.5)
+findStaminaObjects()
+
+-- The actual logic
 local function applyStaminaGain(amount)
-    --[[
-        This is where we apply the gain.
-        Example (NEEDS TO BE VERIFIED):
-        
-        if not findStaminaObject() then return end
-        pcall(function()
-            staminaObject.Value = amount
-        end)
-    ]]
+    if not (staminaValueObj and staminaValueObj.Parent) then
+        findStaminaObjects() -- Try to find it again
+        if not staminaValueObj then return end -- Still not found
+    end
+    pcall(function()
+        staminaValueObj.Value = amount
+    end)
 end
 
 local function applyStaminaLoss(amount)
-    --[[
-        This is where we apply the loss (e.g., set drain to 0).
-        Example (NEEDS TO BE VERIFIED):
-        
-        if not findStaminaObject() then return end
-        pcall(function()
-            -- This logic is a guess. The real logic might be
-            -- disabling a "drain" script or setting a drain rate.
-            staminaObject.DrainRate.Value = amount 
-        end)
-    ]]
+    if not (staminaDrainValue and staminaDrainValue.Parent) then
+        findStaminaObjects()
+        if not staminaDrainValue then return end
+    end
+    
+    pcall(function()
+        staminaDrainValue.Value = amount
+    end)
+end
+
+local function applySprintSpeed(amount)
+    local hum = getHumanoid()
+    if not hum then return end
+    
+    -- Get and store the original walkspeed once
+    if not walkSpeedSet then
+        originalWalkSpeed = hum.WalkSpeed
+        walkSpeedSet = true
+    end
+    
+    pcall(function()
+        hum.WalkSpeed = amount
+    end)
 end
 -- ==========================================
 
@@ -2170,7 +2248,7 @@ RunService.RenderStepped:Connect(function()
     local cooldown = cachedCooldown
     local now = tick()
 
-    -- ===== NEW: Stamina Logic =====
+    -- ===== NEW: Stamina Logic (FIXED) =====
     -- This will run every frame
     if staminaGainOn then
         applyStaminaGain(staminaGainAmount)
@@ -2178,7 +2256,10 @@ RunService.RenderStepped:Connect(function()
     if staminaLossOn then
         applyStaminaLoss(staminaLossAmount)
     end
-    -- ==============================
+    if sprintSpeedOn then
+        applySprintSpeed(sprintSpeedAmount)
+    end
+    -- ======================================
 
     -- Auto Block (Animation-based) - HEAVILY IMPROVED
     if autoBlockOn and (cooldown and cooldown.Text == "") and (now - lastLocalBlockTime > customLocalCooldown) then
