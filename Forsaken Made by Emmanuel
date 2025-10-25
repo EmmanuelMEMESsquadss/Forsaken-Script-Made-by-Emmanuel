@@ -1,4 +1,4 @@
--- Auto Block Rayfield Script (Full Features) - v8 Gemini Improved (Stamina Tab Fixed)
+-- Auto Block Rayfield Script (Full Features) - v9 Gemini Improved (Auto Generator)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
@@ -55,7 +55,7 @@ local PredictiveTab = Window:CreateTab("Predictive Auto Block", 4483362458)
 local FakeBlockTab = Window:CreateTab("Fake Block", 4483362458)
 local AutoPunchTab = Window:CreateTab("Auto Punch", 4483362458)
 local CustomAnimationsTab = Window:CreateTab("Custom Animations", 4483362458)
-local StaminaTab = Window:CreateTab("Stamina", 4483362458) -- <-- FIXED TAB
+local GeneratorTab = Window:CreateTab("Generator", 4483362458) -- <-- NEW TAB
 local HealthTab = Window:CreateTab("Health", 4483362458)
 local MiscTab = Window:CreateTab("Misc", 4483362458)
 
@@ -228,17 +228,16 @@ local customLocalCooldown = 0.35 -- for audio/anim blocks
 local lastLocalBlockTime = 0 -- Renamed from AUDIO_LOCAL_COOLDOWN
 
 -- REMOVED Proactive Block States
+-- REMOVED Stamina States
 
--- ===== NEW: Stamina Feature States =====
-local staminaGainOn = false
-local staminaGainAmount = 100 -- (e.g., set stamina TO 100)
-local staminaLossOn = false
-local staminaLossAmount = 0 -- (e.g., set stamina drain rate TO 0)
-local sprintSpeedOn = false
-local sprintSpeedAmount = 16 -- Default walkspeed
-local originalWalkSpeed = 16 -- To restore
-local walkSpeedSet = false -- Flag to get original speed once
--- =======================================
+-- ===== NEW: Auto Generator States =====
+local autoFixGenOn = false
+local autoFixSpeed = 0.1 -- How many seconds between "work" signals
+local currentGenTarget = nil
+local lastFixTime = 0
+local genFixStatusLabel = nil -- This will hold our UI label
+local MAX_GEN_DIST = 25 -- How far to look for a generator
+-- =====================================
 
 -- ===== REMOVED: Object Pool for Better Detection (BD) parts =====
 -- All BD part pool functions (getAntiFlickPart, returnAntiFlickPart) have been removed.
@@ -266,7 +265,6 @@ end
 lp.CharacterAdded:Connect(function(char)
     task.wait(0.5)
     refreshAnimator()
-    walkSpeedSet = false -- Reset flag on respawn
 end)
 
 local cachedPlayerGui = PlayerGui
@@ -913,78 +911,46 @@ CustomAnimationsTab:CreateToggle({
     end,
 })
 
--- ===== NEW: StaminaTab UI (FIXED) =====
-StaminaTab:CreateParagraph({
-    Title = "Warning",
-    Content = "This feature is game-specific. It works by *guessing* your game's stamina objects (e.g., 'Stamina' value in your Character). If it doesn't work, the names are different."
+-- ===== NEW: GeneratorTab UI =====
+GeneratorTab:CreateParagraph({
+    Title = "Auto Fix Generator",
+    Content = "Based on the game's code, this will find the nearest generator, 'enter' it, and spam the 'Completed' signal to autofix it."
 })
 
-StaminaTab:CreateParagraph({
-    Title = "How-To",
-    Content = "For 'Stamina Loss', a value of 0 usually means 'No Stamina Drain'."
-})
-
-StaminaTab:CreateToggle({
-    Name = "Enable Custom Stamina Gain",
+GeneratorTab:CreateToggle({
+    Name = "Auto Fix Nearest Generator",
     CurrentValue = false,
-    Flag = "StaminaGainToggle",
-    Callback = function(Value) staminaGainOn = Value end
-})
-
-StaminaTab:CreateInput({
-    Name = "Stamina Gain Amount",
-    PlaceholderText = "100",
-    RemoveTextAfterFocusLost = false,
-    Flag = "StaminaGainAmount",
-    Callback = function(Text) 
-        staminaGainAmount = tonumber(Text) or 100
-    end
-})
-
-StaminaTab:CreateToggle({
-    Name = "Enable Custom Stamina Loss",
-    CurrentValue = false,
-    Flag = "StaminaLossToggle",
-    Callback = function(Value) staminaLossOn = Value end
-})
-
-StaminaTab:CreateInput({
-    Name = "Stamina Loss Amount",
-    PlaceholderText = "0",
-    RemoveTextAfterFocusLost = false,
-    Flag = "StaminaLossAmount",
-    Callback = function(Text) 
-        staminaLossAmount = tonumber(Text) or 0
-    end
-})
-
--- ===== ADDED SPRINT SPEED UI =====
-StaminaTab:CreateToggle({
-    Name = "Enable Custom Sprint Speed",
-    CurrentValue = false,
-    Flag = "SprintSpeedToggle",
+    Flag = "AutoFixGenToggle",
     Callback = function(Value) 
-        sprintSpeedOn = Value
-        -- Restore original speed if toggled off
-        if not Value then
+        autoFixGenOn = Value
+        -- When we turn it off, we must tell the server we "left"
+        if not Value and currentGenTarget then
             pcall(function()
-                local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
-                if hum then
-                    hum.WalkSpeed = originalWalkSpeed
-                end
+                local RF = currentGenTarget:WaitForChild("Remotes"):WaitForChild("RF")
+                RF:InvokeServer("leave")
             end)
+            currentGenTarget = nil
+            if genFixStatusLabel then
+                genFixStatusLabel:Set("Status: Idle")
+            end
         end
     end
 })
 
-StaminaTab:CreateInput({
-    Name = "Sprint Speed Amount",
-    PlaceholderText = "16",
-    RemoveTextAfterFocusLost = false,
-    Flag = "SprintSpeedAmount",
-    Callback = function(Text) 
-        sprintSpeedAmount = tonumber(Text) or 16
-    end
+GeneratorTab:CreateSlider({
+    Name = "Fix Speed (Signal Delay)",
+    Range = {0.05, 1},
+    Increment = 0.01,
+    Suffix = "s",
+    CurrentValue = 0.1,
+    Flag = "AutoFixSpeed",
+    Callback = function(val)
+        autoFixSpeed = val
+    end,
+})
+
+genFixStatusLabel = GeneratorTab:CreateLabel({
+    Name = "Status: Idle"
 })
 -- ============================
 
@@ -1096,11 +1062,7 @@ local function restoreHumState(hum)
     local s = savedHumanoidState[hum]
     if not s then return end
     pcall(function()
-        -- Only restore if sprint speed isn't active
-        if s.WalkSpeed ~= nil and not sprintSpeedOn then 
-            hum.WalkSpeed = s.WalkSpeed 
-        end
-        
+        if s.WalkSpeed ~= nil then hum.WalkSpeed = s.WalkSpeed end
         if s.JumpPower ~= nil then
             local ok, _ = pcall(function() hum.JumpPower = s.JumpPower end)
             if not ok then pcall(function() hum.JumpHeight = s.JumpPower end) end
@@ -1890,10 +1852,7 @@ local function beginDragIntoKiller(killerModel)
             conn:Disconnect()
             if bv and bv.Parent then pcall(function() bv:Destroy() end) end
             pcall(function()
-                -- Only restore if sprint speed isn't active
-                if not sprintSpeedOn then
-                    humanoid.WalkSpeed = oldWalk
-                end
+                humanoid.WalkSpeed = oldWalk
                 humanoid.JumpPower = oldJump
                 humanoid.PlatformStand = oldPlatformStand
             end)
@@ -1901,7 +1860,7 @@ local function beginDragIntoKiller(killerModel)
         end
 
         if not (char and char.Parent) or not (killerModel and killerModel.Parent) then
-            _hitobxDraggingDebounce = false --<-- FIX: Typo
+            _hitboxDraggingDebounce = false 
             return
         end
 
@@ -2145,88 +2104,31 @@ end)
 
 
 -- REMOVED PROACTIVE BLOCKING LOOP
+-- REMOVED Stamina Functions
 
--- ===== NEW: Stamina Logic Functions (REPLACES PLACEHOLDERS) =====
-local staminaValueObj = nil
-local staminaDrainScript = nil -- This is a guess
-local staminaDrainValue = nil -- This is also a guess
-
--- Try to find the common stamina objects
-local function findStaminaObjects()
-    if not lp.Character then return end
+-- ===== NEW: Auto Generator Functions =====
+local function findNearestGenerator(myRoot)
+    local closestGen, closestDist = nil, MAX_GEN_DIST
     
-    -- 1. Find Stamina Value
-    if not (staminaValueObj and staminaValueObj.Parent) then
-        staminaValueObj = lp.Character:FindFirstChild("Stamina")
-    end
-
-    -- 2. Find Stamina Drain Script/Value (This is a guess, but common)
-    if not (staminaDrainValue and staminaDrainValue.Parent) then
-        local playerScripts = lp:FindFirstChild("PlayerScripts")
-        if playerScripts then
-            staminaDrainScript = playerScripts:FindFirstChild("StaminaScript") 
-                or playerScripts:FindFirstChild("ClientStamina")
-                or playerScripts:FindFirstChild("Stamina") -- Sometimes the script itself is named this
+    for _, v in ipairs(workspace:GetChildren()) do
+        -- We identify a "generator" as a model that has "Remotes" and "Progress"
+        if v:IsA("Model") and v:FindFirstChild("Remotes") and v:FindFirstChild("Progress") then
+            local progress = v:FindFirstChild("Progress")
+            local hrp = v:FindFirstChild("PrimaryPart") or v:FindFirstChildWhichIsA("BasePart")
             
-            if staminaDrainScript then
-                 staminaDrainValue = staminaDrainScript:FindFirstChild("DrainRate") 
-                                   or staminaDrainScript:FindFirstChild("StaminaDrain")
+            -- Check if it's already done (Value is 100) and that it has a part to measure distance from
+            if hrp and progress:IsA("IntValue") and progress.Value < 100 then
+                local dist = (hrp.Position - myRoot.Position).Magnitude
+                if dist < closestDist then
+                    closestGen = v
+                    closestDist = dist
+                end
             end
         end
     end
+    return closestGen
 end
-
--- Call this when character is added to re-find objects
-lp.CharacterAdded:Connect(function(char)
-    staminaValueObj = nil
-    staminaDrainScript = nil
-    staminaDrainValue = nil
-    walkSpeedSet = false -- Also reset walkspeed flag
-    task.wait(1.5) -- Give game scripts time to load
-    findStaminaObjects()
-end)
-
--- Call it once on startup
-task.wait(1.5)
-findStaminaObjects()
-
--- The actual logic
-local function applyStaminaGain(amount)
-    if not (staminaValueObj and staminaValueObj.Parent) then
-        findStaminaObjects() -- Try to find it again
-        if not staminaValueObj then return end -- Still not found
-    end
-    pcall(function()
-        staminaValueObj.Value = amount
-    end)
-end
-
-local function applyStaminaLoss(amount)
-    if not (staminaDrainValue and staminaDrainValue.Parent) then
-        findStaminaObjects()
-        if not staminaDrainValue then return end
-    end
-    
-    pcall(function()
-        staminaDrainValue.Value = amount
-    end)
-end
-
-local function applySprintSpeed(amount)
-    local hum = getHumanoid()
-    if not hum then return end
-    
-    -- Get and store the original walkspeed once
-    if not walkSpeedSet then
-        originalWalkSpeed = hum.WalkSpeed
-        walkSpeedSet = true
-    end
-    
-    pcall(function()
-        hum.WalkSpeed = amount
-    end)
-end
--- ==========================================
+-- =======================================
 
 
 -- ====================================
@@ -2248,18 +2150,60 @@ RunService.RenderStepped:Connect(function()
     local cooldown = cachedCooldown
     local now = tick()
 
-    -- ===== NEW: Stamina Logic (FIXED) =====
-    -- This will run every frame
-    if staminaGainOn then
-        applyStaminaGain(staminaGainAmount)
+    -- ===== NEW: Auto Generator Logic =====
+    if autoFixGenOn then
+        local now = tick()
+        if not currentGenTarget then
+            -- 1. Find a new generator
+            local nearestGen = findNearestGenerator(myRoot)
+            if nearestGen then
+                currentGenTarget = nearestGen
+                if genFixStatusLabel then genFixStatusLabel:Set("Status: Starting...") end
+                
+                -- 2. Send the "enter" signal
+                pcall(function()
+                    local RF = currentGenTarget:WaitForChild("Remotes"):WaitForChild("RF")
+                    local result = RF:InvokeServer("enter")
+                    
+                    if result ~= "fixing" then
+                        -- We failed to start, so unset it and try again next frame
+                        if genFixStatusLabel then genFixStatusLabel:Set("Status: Target busy...") end
+                        currentGenTarget = nil
+                    else
+                        -- Success!
+                        if genFixStatusLabel then genFixStatusLabel:Set("Status: Fixing " .. currentGenTarget.Name) end
+                        lastFixTime = now
+                    end
+                end)
+            else
+                -- No generator found
+                if genFixStatusLabel then genFixStatusLabel:Set("Status: No generators in range") end
+            end
+        
+        else
+            -- 3. We are currently fixing a generator, check it
+            local progress = currentGenTarget:FindFirstChild("Progress")
+            if not currentGenTarget.Parent or (progress and progress.Value >= 100) then
+                -- Generator is gone or is finished
+                if genFixStatusLabel then genFixStatusLabel:Set("Status: Generator Finished!") end
+                pcall(function()
+                    local RF = currentGenTarget:WaitForChild("Remotes"):WaitForChild("RF")
+                    RF:InvokeServer("leave")
+                end)
+                currentGenTarget = nil
+            
+            elseif now - lastFixTime > autoFixSpeed then
+                -- 4. Send the "work" signal
+                pcall(function()
+                    local RE = currentGenTarget:WaitForChild("Remotes"):WaitForChild("RE")
+                    -- From the guide code, this seems to be the right format
+                    RE:FireServer(currentGenTarget, "Completed") 
+                end)
+                lastFixTime = now
+            end
+        end
     end
-    if staminaLossOn then
-        applyStaminaLoss(staminaLossAmount)
-    end
-    if sprintSpeedOn then
-        applySprintSpeed(sprintSpeedAmount)
-    end
-    -- ======================================
+    -- ===================================
 
     -- Auto Block (Animation-based) - HEAVILY IMPROVED
     if autoBlockOn and (cooldown and cooldown.Text == "") and (now - lastLocalBlockTime > customLocalCooldown) then
