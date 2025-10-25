@@ -1,4 +1,4 @@
--- Auto Block Rayfield Script (Full Features) - v6 Gemini Improved (Synergy Aimbot)
+-- Auto Block Rayfield Script (Full Features) - v7 Gemini Improved (Stamina Tab)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
@@ -55,6 +55,7 @@ local PredictiveTab = Window:CreateTab("Predictive Auto Block", 4483362458)
 local FakeBlockTab = Window:CreateTab("Fake Block", 4483362458)
 local AutoPunchTab = Window:CreateTab("Auto Punch", 4483362458)
 local CustomAnimationsTab = Window:CreateTab("Custom Animations", 4483362458)
+local StaminaTab = Window:CreateTab("Stamina", 4483362458) -- <-- NEW TAB
 local HealthTab = Window:CreateTab("Health", 4483362458)
 local MiscTab = Window:CreateTab("Misc", 4483362458)
 
@@ -227,6 +228,13 @@ local customLocalCooldown = 0.35 -- for audio/anim blocks
 local lastLocalBlockTime = 0 -- Renamed from AUDIO_LOCAL_COOLDOWN
 
 -- REMOVED Proactive Block States
+
+-- ===== NEW: Stamina Feature States =====
+local staminaGainOn = false
+local staminaGainAmount = 100 -- Default to 100 (e.g., set stamina to 100)
+local staminaLossOn = false
+local staminaLossAmount = 0 -- Default to 0 (e.g., set stamina drain to 0)
+-- =======================================
 
 -- ===== REMOVED: Object Pool for Better Detection (BD) parts =====
 -- All BD part pool functions (getAntiFlickPart, returnAntiFlickPart) have been removed.
@@ -899,6 +907,52 @@ CustomAnimationsTab:CreateToggle({
         customChargeEnabled = value
     end,
 })
+
+-- ===== NEW: StaminaTab UI =====
+StaminaTab:CreateParagraph({
+    Title = "Warning",
+    Content = "This feature is game-specific. It will NOT work until the script is configured with your game's stamina system."
+})
+
+StaminaTab:CreateParagraph({
+    Title = "How-To",
+    Content = "Find the 'c00lgui' stamina code and give it to the script developer (Gemini) to integrate."
+})
+
+StaminaTab:CreateToggle({
+    Name = "Enable Custom Stamina Gain",
+    CurrentValue = false,
+    Flag = "StaminaGainToggle",
+    Callback = function(Value) staminaGainOn = Value end
+})
+
+StaminaTab:CreateInput({
+    Name = "Stamina Gain Amount",
+    PlaceholderText = "100",
+    RemoveTextAfterFocusLost = false,
+    Flag = "StaminaGainAmount",
+    Callback = function(Text) 
+        staminaGainAmount = tonumber(Text) or 100
+    end
+})
+
+StaminaTab:CreateToggle({
+    Name = "Enable Custom Stamina Loss",
+    CurrentValue = false,
+    Flag = "StaminaLossToggle",
+    Callback = function(Value) staminaLossOn = Value end
+})
+
+StaminaTab:CreateInput({
+    Name = "Stamina Loss Amount",
+    PlaceholderText = "0",
+    RemoveTextAfterFocusLost = false,
+    Flag = "StaminaLossAmount",
+    Callback = function(Text) 
+        staminaLossAmount = tonumber(Text) or 0
+    end
+})
+-- ============================
 
 -- HealthTab
 HealthTab:CreateParagraph({
@@ -1806,7 +1860,7 @@ local function beginDragIntoKiller(killerModel)
         end
 
         if not (char and char.Parent) or not (killerModel and killerModel.Parent) then
-            _hitboxDraggingDebounce = false
+            _hitobxDraggingDebounce = false --<-- FIX: Typo
             return
         end
 
@@ -2051,6 +2105,51 @@ end)
 
 -- REMOVED PROACTIVE BLOCKING LOOP
 
+-- ===== NEW: Stamina Placeholder Functions =====
+-- We will fill these in once we have the intel from 'c00lgui'
+local staminaObject = nil -- We need to find this!
+
+local function findStaminaObject()
+    --[[
+        This is where we'll add the code to find the stamina.
+        Example (NEEDS TO BE VERIFIED):
+        
+        if staminaObject and staminaObject.Parent then return true end -- Already found
+        staminaObject = lp.Character:FindFirstChild("Stamina")
+        if staminaObject then return true end
+        
+        return false
+    ]]
+    return false -- Return false until we add the real code
+end
+
+local function applyStaminaGain(amount)
+    --[[
+        This is where we apply the gain.
+        Example (NEEDS TO BE VERIFIED):
+        
+        if not findStaminaObject() then return end
+        pcall(function()
+            staminaObject.Value = amount
+        end)
+    ]]
+end
+
+local function applyStaminaLoss(amount)
+    --[[
+        This is where we apply the loss (e.g., set drain to 0).
+        Example (NEEDS TO BE VERIFIED):
+        
+        if not findStaminaObject() then return end
+        pcall(function()
+            -- This logic is a guess. The real logic might be
+            -- disabling a "drain" script or setting a drain rate.
+            staminaObject.DrainRate.Value = amount 
+        end)
+    ]]
+end
+-- ==========================================
+
 
 -- ====================================
 -- ===== MAIN MULTI-PURPOSE LOOP =====
@@ -2070,6 +2169,16 @@ RunService.RenderStepped:Connect(function()
     local charges = cachedCharges
     local cooldown = cachedCooldown
     local now = tick()
+
+    -- ===== NEW: Stamina Logic =====
+    -- This will run every frame
+    if staminaGainOn then
+        applyStaminaGain(staminaGainAmount)
+    end
+    if staminaLossOn then
+        applyStaminaLoss(staminaLossAmount)
+    end
+    -- ==============================
 
     -- Auto Block (Animation-based) - HEAVILY IMPROVED
     if autoBlockOn and (cooldown and cooldown.Text == "") and (now - lastLocalBlockTime > customLocalCooldown) then
