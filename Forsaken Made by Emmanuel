@@ -1,4 +1,4 @@
--- Auto Block Rayfield Script (Full Features) - v10 Gemini Improved (Stamina Features Re-Engineered)
+-- Auto Block Rayfield Script (Full Features) - v12 Gemini Improved (Removed Non-Functional Stamina Rates)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
@@ -60,7 +60,7 @@ local PredictiveTab = Window:CreateTab("Predictive Auto Block", 4483362458)
 local FakeBlockTab = Window:CreateTab("Fake Block", 4483362458)
 local AutoPunchTab = Window:CreateTab("Auto Punch", 4483362458)
 local CustomAnimationsTab = Window:CreateTab("Custom Animations", 4483362458)
-local StaminaTab = Window:CreateTab("Stamina", 4483362458) -- <-- FIXED TAB
+local StaminaTab = Window:CreateTab("Stamina", 4483362458) 
 local HealthTab = Window:CreateTab("Health", 4483362458)
 local MiscTab = Window:CreateTab("Misc", 4483362458)
 
@@ -234,15 +234,17 @@ local lastLocalBlockTime = 0 -- Renamed from AUDIO_LOCAL_COOLDOWN
 
 -- REMOVED Proactive Block States
 
--- ===== v10: Stamina Feature States =====
-local staminaGainOn = false
-local staminaRegenRate = 20 -- Renamed from 'staminaGainAmount', new default (based on decompile)
-local staminaLossOn = false
-local staminaDrainRate = 10 -- Renamed from 'staminaLossAmount', new default (based on decompile)
+-- ===== v12: Stamina Feature States =====
+local maxStaminaOn = false       
+local maxStaminaAmount = 100    
+-- local staminaGainOn = false      -- REMOVED (Regen Rate)
+-- local staminaRegenRate = 20      -- REMOVED 
+-- local staminaLossOn = false      -- REMOVED (Drain Rate)
+-- local staminaDrainRate = 10      -- REMOVED 
 local sprintSpeedOn = false
-local sprintSpeedAmount = 16 -- Default walkspeed
-local originalWalkSpeed = 16 -- To restore
-local walkSpeedSet = false -- Flag to get original speed once
+local sprintSpeedAmount = 16
+local originalWalkSpeed = 16
+local walkSpeedSet = false
 -- =======================================
 
 -- ===== REMOVED: Object Pool for Better Detection (BD) parts =====
@@ -918,47 +920,34 @@ CustomAnimationsTab:CreateToggle({
     end,
 })
 
--- ===== v10: StaminaTab UI (Renamed) =====
+-- ===== v12: StaminaTab UI (Rates Removed) =====
 StaminaTab:CreateParagraph({
     Title = "How-To",
-    Content = "These features modify the game's sprint module. Set Drain Rate to 0 for no stamina loss. Increase Regen Rate to get stamina back faster."
+    Content = "'Set Max Stamina' directly changes the maximum. 'Custom Sprint Speed' only applies while sprinting."
 })
 
 StaminaTab:CreateToggle({
-    Name = "Enable Custom Stamina Regen Rate", -- Renamed
+    Name = "Enable Set Max Stamina", 
     CurrentValue = false,
-    Flag = "StaminaGainToggle",
-    Callback = function(Value) staminaGainOn = Value end
+    Flag = "MaxStaminaToggle",
+    Callback = function(Value) maxStaminaOn = Value end
 })
 
 StaminaTab:CreateInput({
-    Name = "Stamina Regen Rate", -- Renamed
-    PlaceholderText = "20", -- New default
+    Name = "Set Max Stamina Amount", 
+    PlaceholderText = "100", 
     RemoveTextAfterFocusLost = false,
-    Flag = "StaminaRegenRate", -- Renamed
+    Flag = "MaxStaminaAmount", 
     Callback = function(Text) 
-        staminaRegenRate = tonumber(Text) or 20
+        maxStaminaAmount = tonumber(Text) or 100
     end
 })
 
-StaminaTab:CreateToggle({
-    Name = "Enable Custom Stamina Drain Rate", -- Renamed
-    CurrentValue = false,
-    Flag = "StaminaLossToggle",
-    Callback = function(Value) staminaLossOn = Value end
-})
+-- REMOVED Regen Rate Toggle
+-- REMOVED Regen Rate Input
+-- REMOVED Drain Rate Toggle
+-- REMOVED Drain Rate Input
 
-StaminaTab:CreateInput({
-    Name = "Stamina Drain Rate", -- Renamed
-    PlaceholderText = "10", -- New default
-    RemoveTextAfterFocusLost = false,
-    Flag = "StaminaDrainRate", -- Renamed
-    Callback = function(Text) 
-        staminaDrainRate = tonumber(Text) or 10
-    end
-})
-
--- ===== v10: Sprint Speed UI =====
 StaminaTab:CreateParagraph({
     Title = "Custom Sprint Speed",
     Content = "Only applies your custom speed *while* you are sprinting."
@@ -970,7 +959,6 @@ StaminaTab:CreateToggle({
     Flag = "SprintSpeedToggle",
     Callback = function(Value) 
         sprintSpeedOn = Value
-        -- Restore original speed if toggled off
         if not Value then
             pcall(function()
                 local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
@@ -978,7 +966,7 @@ StaminaTab:CreateToggle({
                     hum.WalkSpeed = originalWalkSpeed
                 end
             end)
-            walkSpeedSet = false -- v10 fix: Reset flag
+            walkSpeedSet = false 
         end
     end
 })
@@ -2152,39 +2140,15 @@ end)
 
 -- REMOVED PROACTIVE BLOCKING LOOP
 
--- ===== v10: Stamina Logic Functions (Re-Engineered) =====
--- These functions now modify the properties of the SprintingModule
--- instead of trying to hard-set the player's stamina value.
+-- ===== v12: Stamina Logic Functions =====
+-- Removed applyStaminaGain and applyStaminaLoss
 
-local function applyStaminaGain(amount) -- This is now applyStaminaREGEN
+local function applyMaxStamina(amount) 
     if not SprintingModule then return end
     pcall(function()
-        -- Guessing property names based on config [24] = 20
-        SprintingModule.RegenRate = amount
-    end)
-    pcall(function()
-        -- Fallback guess
-        SprintingModule.StaminaRegen = amount
+        SprintingModule.MaxStamina = amount 
     end)
 end
-
-local function applyStaminaLoss(amount) -- This is now applyStaminaDRAIN
-    if not SprintingModule then return end
-    
-    -- From decompiled code, Sprinting_upvr table has properties for this.
-    -- We try to set the most common names, which your original script already guessed.
-    pcall(function()
-        -- Guessing property names based on config [22] = 10
-        SprintingModule.DrainRate = amount 
-    end)
-    pcall(function()
-        -- Fallback guess
-        SprintingModule.StaminaDrain = amount
-    end)
-end
-
--- This function is no longer used, logic moved to main loop
--- local function applySprintSpeed(amount)
 -- ==========================================
 
 
@@ -2207,14 +2171,14 @@ RunService.RenderStepped:Connect(function()
     local cooldown = cachedCooldown
     local now = tick()
 
-    -- ===== v10: Stamina & Speed Logic (Re-Engineered) =====
-    if staminaGainOn then
-        applyStaminaGain(staminaRegenRate) -- Uses new rate variable
+    -- ===== v12: Stamina & Speed Logic =====
+    if maxStaminaOn then              
+        applyMaxStamina(maxStaminaAmount) 
     end
-    if staminaLossOn then
-        applyStaminaLoss(staminaDrainRate) -- Uses new rate variable
-    end
+    -- REMOVED applyStaminaGain call
+    -- REMOVED applyStaminaLoss call
     
+    -- Sprint Speed Logic (Unchanged from v10)
     if sprintSpeedOn then
         if not walkSpeedSet then
             originalWalkSpeed = Humanoid.WalkSpeed
@@ -2223,17 +2187,17 @@ RunService.RenderStepped:Connect(function()
         
         local isSprinting = false 
         pcall(function() 
-            -- Guessing property name, e.g., [2] = false, [23] = false in decompile
             isSprinting = SprintingModule.IsSprinting 
         end)
         
         if isSprinting then
             Humanoid.WalkSpeed = sprintSpeedAmount
         else
-            Humanoid.WalkSpeed = originalWalkSpeed
+            if walkSpeedSet then 
+               Humanoid.WalkSpeed = originalWalkSpeed 
+            end
         end
     elseif walkSpeedSet then 
-        -- Runs once after toggle is set to false to restore speed
         Humanoid.WalkSpeed = originalWalkSpeed
         walkSpeedSet = false
     end
@@ -2424,3 +2388,4 @@ RunService.RenderStepped:Connect(function()
 end)
 
 Rayfield:LoadConfiguration()
+
